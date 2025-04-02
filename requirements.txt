@@ -3,6 +3,5 @@ pandas
 numpy  
 matplotlib  
 altair  
-sqlite3  
 plotly  
 streamlit_option_menu  
