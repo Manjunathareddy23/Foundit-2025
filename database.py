@@ -1,15 +1,13 @@
 import sqlite3
-import hashlib
 import uuid
+import hashlib
 from datetime import datetime
 
-# Initialize database connection
 def get_db_connection():
     conn = sqlite3.connect('task_manager.db')
     conn.row_factory = sqlite3.Row
     return conn
 
-# Initialize database tables
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
