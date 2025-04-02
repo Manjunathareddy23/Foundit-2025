@@ -1,8 +1,3 @@
-Here's the complete, fixed Streamlit application for an Advanced Task Manager with Tailwind CSS styling:
-
-```python
-# app.py - Main Streamlit application file
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -20,6 +15,11 @@ from io import StringIO, BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
 from streamlit_option_menu import option_menu
+
+# Function to load and apply CSS
+def load_css(file_name):
+    with open(file_name, 'r') as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
 # Initialize database connection
 def get_db_connection():
@@ -773,99 +773,98 @@ def update_user_settings(user_id, settings):
         return False, f"Error updating settings: {str(e)}"
 
 # UI Components and Pages
-def apply_custom_css():
-    # Load the Tailwind-inspired CSS
-    st.markdown("""
-    <style>
-    /* Base styles */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+def login_page():
+    st.title("Advanced Task Manager")
+    st.subheader("Login to your account")
     
-    :root {
-        --primary-color: #3b82f6;
-        --primary-color-hover: #2563eb;
-        --secondary-color: #64748b;
-        --accent-color: #10b981;
-        --warning-color: #f59e0b;
-        --danger-color: #ef4444;
-        --success-color: #22c55e;
-        --dark-bg: #1e293b;
-        --dark-surface: #334155;
-        --dark-text: #f8fafc;
-        --light-bg: #f1f5f9;
-        --light-surface: #ffffff;
-        --light-text: #0f172a;
-    }
+    col1, col2 = st.columns([1, 1])
     
-    .stApp {
-        font-family: 'Inter', sans-serif !important;
-    }
+    with col1:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Login")
+            
+            if submit:
+                if not username or not password:
+                    st.error("Please enter both username and password")
+                else:
+                    success, message = login_user(username, password)
+                    if success:
+                        st.success(message)
+                        st.experimental_rerun()
+                    else:
+                        st.error(message)
     
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: var(--light-surface);
-        border-right: 1px solid #e2e8f0;
-    }
+    with col2:
+        with st.form("register_form"):
+            st.subheader("New User? Register Here")
+            new_username = st.text_input("Username")
+            new_email = st.text_input("Email (optional)")
+            new_password = st.text_input("Password", type="password")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            register = st.form_submit_button("Register")
+            
+            if register:
+                if not new_username or not new_password:
+                    st.error("Username and password are required")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match")
+                else:
+                    success, message = register_user(new_username, new_password, new_email)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+def dashboard_page():
+    st.title(f"Welcome, {st.session_state.username}!")
     
-    .dark section[data-testid="stSidebar"] {
-        background-color: var(--dark-surface);
-        border-right: 1px solid #475569;
-    }
+    # Get task statistics
+    stats = get_task_statistics(st.session_state.user_id)
     
-    /* Main area styling */
-    .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
+    # Display key metrics
+    col1, col2, col3, col4 = st.columns(4)
     
-    /* Header styling */
-    h1, h2, h3, h4, h5, h6 {
-        font-weight: 600 !important;
-        color: var(--light-text);
-    }
+    with col1:
+        st.metric("Total Tasks", stats.get('total', 0))
     
-    .dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 {
-        color: var(--dark-text);
-    }
+    with col2:
+        st.metric("Completed", stats.get('completed', 0))
     
-    h1 {
-        font-size: 2rem !important;
-        margin-bottom: 1.5rem !important;
-    }
+    with col3:
+        st.metric("Pending", stats.get('pending', 0))
     
-    h2 {
-        font-size: 1.5rem !important;
-        margin-bottom: 1.25rem !important;
-    }
+    with col4:
+        st.metric("Overdue", stats.get('overdue', 0))
     
-    h3 {
-        font-size: 1.25rem !important;
-        margin-bottom: 1rem !important;
-    }
+    # Display task distribution charts
+    col1, col2 = st.columns(2)
     
-    /* Button styling */
-    button[kind="primary"] {
-        background-color: var(--primary-color) !important;
-        border-radius: 0.375rem !important;
-        border: none !important;
-        color: white !important;
-        font-weight: 500 !important;
-        transition: all 0.2s ease-in-out !important;
-    }
+    with col1:
+        st.subheader("Task Status Distribution")
+        
+        if stats.get('status_distribution'):
+            status_df = pd.DataFrame({
+                'Status': list(stats['status_distribution'].keys()),
+                'Count': list(stats['status_distribution'].values())
+            })
+            
+            fig = px.pie(status_df, values='Count', names='Status', 
+                         color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No tasks available for status distribution")
     
-    button[kind="primary"]:hover {
-        background-color: var(--primary-color-hover) !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
-    }
-    
-    button[kind="secondary"] {
-        background-color: var(--secondary-color) !important;
-        border-radius: 0.375rem !important;
-        border: none !important;
-        color: white !important;
-        font-weight: 500 !important;
-        transition: all 0.2s ease-in-out !important;
-    }
-    
-    button[kind="secondary"]:hover {
-        opacity: 0.9 !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0
+    with col2:
+        st.subheader("Task Priority Distribution")
+        
+        if stats.get('priority_distribution'):
+            priority_df = pd.DataFrame({
+                'Priority': list(stats['priority_distribution'].keys()),
+                'Count': list(stats['priority_distribution'].values())
+            })
+            
+            fig = px.bar(priority_df, x='Priority', y='Count', 
+                        color='Priority', color_discrete_sequence=px.colors.qualitative.Bold)
+            st.plotly_chart(fig, use
