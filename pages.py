@@ -1,3 +1,4 @@
+
 import streamlit as st
 from datetime import datetime, timedelta
 import pandas as pd
@@ -6,7 +7,7 @@ import plotly.graph_objects as go
 
 from auth import login_user, logout_user, register_user
 from task import add_task, get_tasks, update_task, delete_task, get_task_statistics
-from notification import get_notifications, mark_notification_as_read
+from notification import get_notifications, mark_notification_as_read, mark_all_notifications_as_read
 from backup import create_backup, restore_from_backup
 from export import export_tasks_to_csv, export_tasks_to_json
 from settings import get_user_settings, update_user_settings
@@ -44,7 +45,7 @@ def login_page():
             register = st.form_submit_button("Register")
             
             if register:
-                if not new_username or not new_password:
+                if not new_username or new_password:
                     st.error("Username and password are required")
                 elif new_password != confirm_password:
                     st.error("Passwords do not match")
@@ -333,3 +334,185 @@ def add_task_page():
                 # Prepare task data
                 new_task_data = {
                     'title': title,
+                    'description': description,
+                    'priority': priority,
+                    'status': status,
+                    'due_date': due_date.strftime('%Y-%m-%d'),
+                    'assigned_to': assigned_to,
+                    'tags': tags,
+                    'time_estimate': int(time_estimate * 60),  # Convert to minutes
+                    'recurring': recurring,
+                    'notes': notes
+                }
+                
+                if recurring != "None" and recurrence_end_date:
+                    new_task_data['recurrence_end_date'] = recurrence_end_date.strftime('%Y-%m-%d')
+                
+                if reminder != "None":
+                    new_task_data['reminder'] = reminder
+                
+                if time_spent > 0:
+                    new_task_data['time_spent'] = int(time_spent * 60)  # Convert to minutes
+                
+                if editing:
+                    # Update existing task
+                    success, message = update_task(st.session_state.selected_task, new_task_data)
+                    if success:
+                        st.success(message)
+                        # Clear selected task
+                        st.session_state.selected_task = None
+                        # Redirect to tasks page
+                        st.session_state.current_page = "view_tasks"
+                        st.experimental_rerun()
+                    else:
+                        st.error(message)
+                else:
+                    # Add new task
+                    success, message, _ = add_task(new_task_data)
+                    if success:
+                        st.success(message)
+                        # Redirect to tasks page
+                        st.session_state.current_page = "view_tasks"
+                        st.experimental_rerun()
+                    else:
+                        st.error(message)
+    
+    # Cancel button for editing
+    if editing:
+        if st.button("Cancel"):
+            st.session_state.selected_task = None
+            st.session_state.current_page = "view_tasks"
+            st.experimental_rerun()
+
+def view_tasks_page():
+    st.title("View Tasks")
+    
+    # Filters
+    with st.expander("Filters", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            filter_status = st.selectbox(
+                "Status",
+                ["All", "Pending", "In Progress", "Completed"]
+            )
+        
+        with col2:
+            filter_priority = st.selectbox(
+                "Priority",
+                ["All", "Low", "Medium", "High"]
+            )
+        
+        with col3:
+            filter_tags = st.text_input("Tags")
+        
+        with col4:
+            filter_search = st.text_input("Search")
+        
+        # Apply filters button
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            apply_filters = st.button("Apply Filters")
+        with col2:
+            clear_filters = st.button("Clear Filters")
+    
+    # Build filters dictionary
+    filters = {}
+    if apply_filters:
+        if filter_status != "All":
+            filters['status'] = filter_status
+        
+        if filter_priority != "All":
+            filters['priority'] = filter_priority
+        
+        if filter_tags:
+            filters['tags'] = filter_tags
+        
+        if filter_search:
+            filters['search'] = filter_search
+    
+    if clear_filters:
+        # Reset all filters
+        st.experimental_rerun()
+    
+    # Get tasks with filters
+    tasks = get_tasks(st.session_state.user_id, filters=filters)
+    
+    # Display tasks
+    if tasks:
+        # Sorting options
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            sort_by = st.selectbox(
+                "Sort By",
+                ["due_date", "priority", "status", "title"]
+            )
+        with col2:
+            sort_order = st.radio(
+                "Order",
+                ["Ascending", "Descending"],
+                horizontal=True
+            )
+        
+        # Sort tasks
+        tasks = get_tasks(
+            st.session_state.user_id, 
+            filters=filters,
+            sort_by=sort_by,
+            sort_order="asc" if sort_order == "Ascending" else "desc"
+        )
+        
+        # Display tasks in a table
+        task_df = pd.DataFrame([
+            {
+                'Title': t['title'],
+                'Priority': t['priority'],
+                'Status': t['status'],
+                'Due Date': t['due_date'],
+                'Assigned To': t['assigned_to_name'],
+                'Tags': t['tags']
+            } for t in tasks
+        ])
+        
+        st.dataframe(task_df, use_container_width=True)
+        
+        # Export options
+        st.subheader("Export Tasks")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Export as CSV"):
+                csv_data = export_tasks_to_csv(tasks)
+                if csv_data:
+                    st.download_button(
+                        "Download CSV",
+                        csv_data,
+                        "tasks.csv",
+                        "text/csv"
+                    )
+        
+        with col2:
+            if st.button("Export as JSON"):
+                json_data = export_tasks_to_json(tasks)
+                if json_data:
+                    st.download_button(
+                        "Download JSON",
+                        json_data,
+                        "tasks.json",
+                        "application/json"
+                    )
+        
+        # Task details section
+        st.subheader("Task Details")
+        selected_task_id = st.selectbox(
+            "Select a task to view details",
+            options=[t['id'] for t in tasks],
+            format_func=lambda x: next((t['title'] for t in tasks if t['id'] == x), x)
+        )
+        
+        if selected_task_id:
+            selected_task = next((t for t in tasks if t['id'] == selected_task_id), None)
+            
+            if selected_task:
+                with st.expander("Task Details", expanded=True):
+                    st.write(f"**Title:** {
