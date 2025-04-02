@@ -1,8 +1,7 @@
-import streamlit as st
 import uuid
 from datetime import datetime, timedelta
-from db_utils import get_db_connection
-from notification_utils import create_notification
+import streamlit as st
+from database import get_db_connection
 
 def add_task(task_data):
     try:
@@ -39,8 +38,19 @@ def add_task(task_data):
         
         # If task is assigned to someone else, create notification
         if task_data.get('assigned_to') != st.session_state.user_id:
+            notification_id = str(uuid.uuid4())
             message = f"You have been assigned a new task: {task_data['title']}"
-            create_notification(task_data.get('assigned_to'), task_id, message)
+            
+            cursor.execute('''
+            INSERT INTO notifications (id, user_id, task_id, message, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (
+                notification_id,
+                task_data.get('assigned_to'),
+                task_id,
+                message,
+                now
+            ))
         
         conn.commit()
         conn.close()
@@ -52,79 +62,6 @@ def add_task(task_data):
         return True, "Task added successfully", task_id
     except Exception as e:
         return False, f"Error adding task: {str(e)}", None
-
-def create_recurring_tasks(parent_task_id, task_data):
-    try:
-        # Get the parent task
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tasks WHERE id = ?", (parent_task_id,))
-        parent_task = cursor.fetchone()
-        conn.close()
-        
-        if not parent_task:
-            return False
-        
-        # Convert due_date to datetime
-        if not parent_task['due_date']:
-            return False
-        
-        due_date = datetime.strptime(parent_task['due_date'], "%Y-%m-%d")
-        end_date = None
-        
-        if task_data.get('recurrence_end_date'):
-            end_date = datetime.strptime(task_data['recurrence_end_date'], "%Y-%m-%d")
-        
-        # Determine the recurrence pattern and number of instances to create
-        recurring_type = task_data.get('recurring', 'None')
-        instances_to_create = 0
-        
-        if recurring_type == 'Daily':
-            if end_date:
-                instances_to_create = (end_date - due_date).days
-            else:
-                instances_to_create = 30  # Create a month of daily tasks
-        elif recurring_type == 'Weekly':
-            if end_date:
-                instances_to_create = ((end_date - due_date).days // 7)
-            else:
-                instances_to_create = 12  # Create 3 months of weekly tasks
-        elif recurring_type == 'Monthly':
-            if end_date:
-                instances_to_create = ((end_date.year - due_date.year) * 12 + 
-                                      end_date.month - due_date.month)
-            else:
-                instances_to_create = 6  # Create 6 months of monthly tasks
-        elif recurring_type == 'Yearly':
-            if end_date:
-                instances_to_create = (end_date.year - due_date.year)
-            else:
-                instances_to_create = 3  # Create 3 years of yearly tasks
-        
-        # Create recurring task instances
-        for i in range(1, instances_to_create + 1):
-            new_task = dict(task_data)
-            
-            if recurring_type == 'Daily':
-                new_due_date = due_date + timedelta(days=i)
-            elif recurring_type == 'Weekly':
-                new_due_date = due_date + timedelta(weeks=i)
-            elif recurring_type == 'Monthly':
-                new_month = ((due_date.month - 1 + i) % 12) + 1
-                new_year = due_date.year + ((due_date.month - 1 + i) // 12)
-                new_due_date = due_date.replace(year=new_year, month=new_month)
-            elif recurring_type == 'Yearly':
-                new_due_date = due_date.replace(year=due_date.year + i)
-            
-            new_task['due_date'] = new_due_date.strftime("%Y-%m-%d")
-            new_task['title'] = f"{task_data['title']} ({i+1})"
-            
-            add_task(new_task)
-        
-        return True
-    except Exception as e:
-        st.error(f"Error creating recurring tasks: {str(e)}")
-        return False
 
 def get_tasks(user_id=None, filters=None, sort_by=None, sort_order="asc"):
     try:
@@ -224,8 +161,20 @@ def update_task(task_id, updates):
         
         # Create notification if assigned_to has changed
         if 'assigned_to' in updates and updates['assigned_to'] != current_task['assigned_to']:
+            notification_id = str(uuid.uuid4())
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             message = f"You have been assigned a task: {current_task['title']}"
-            create_notification(updates['assigned_to'], task_id, message)
+            
+            cursor.execute('''
+            INSERT INTO notifications (id, user_id, task_id, message, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (
+                notification_id,
+                updates['assigned_to'],
+                task_id,
+                message,
+                now
+            ))
         
         conn.commit()
         conn.close()
@@ -249,3 +198,96 @@ def delete_task(task_id):
         return True, "Task deleted successfully"
     except Exception as e:
         return False, f"Error deleting task: {str(e)}"
+
+def get_task_statistics(user_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all tasks for the user
+        cursor.execute("""
+        SELECT * FROM tasks 
+        WHERE assigned_to = ? OR assigned_by = ?
+        """, (user_id, user_id))
+        
+        tasks = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        # Calculate statistics
+        stats = {
+            'total': len(tasks),
+            'completed': len([t for t in tasks if t['status'] == 'Completed']),
+            'pending': len([t for t in tasks if t['status'] == 'Pending']),
+            'in_progress': len([t for t in tasks if t['status'] == 'In Progress']),
+            'overdue': 0,
+            'due_today': 0,
+            'due_this_week': 0,
+            'priority_high': len([t for t in tasks if t['priority'] == 'High']),
+            'priority_medium': len([t for t in tasks if t['priority'] == 'Medium']),
+            'priority_low': len([t for t in tasks if t['priority'] == 'Low']),
+            'time_spent': sum([t['time_spent'] or 0 for t in tasks]),
+            'estimated_time': sum([t['time_estimate'] or 0 for t in tasks])
+        }
+        
+        # Calculate date-based statistics
+        today = datetime.now().date()
+        for task in tasks:
+            if task['due_date'] and task['status'] != 'Completed':
+                due_date = datetime.strptime(task['due_date'], "%Y-%m-%d").date()
+                
+                if due_date < today:
+                    stats['overdue'] += 1
+                elif due_date == today:
+                    stats['due_today'] += 1
+                elif due_date <= today + timedelta(days=7):
+                    stats['due_this_week'] += 1
+        
+        # Calculate completion rate
+        if stats['total'] > 0:
+            stats['completion_rate'] = (stats['completed'] / stats['total']) * 100
+        else:
+            stats['completion_rate'] = 0
+        
+        # Calculate time efficiency
+        if stats['estimated_time'] > 0:
+            stats['time_efficiency'] = (stats['time_spent'] / stats['estimated_time']) * 100
+        else:
+            stats['time_efficiency'] = 0
+        
+        # Calculate trending data (tasks by creation date)
+        task_dates = {}
+        for task in tasks:
+            date = task['created_date'].split(' ')[0]  # Get just the date part
+            if date in task_dates:
+                task_dates[date] += 1
+            else:
+                task_dates[date] = 1
+        
+        stats['task_trend'] = task_dates
+        
+        # Calculate status distribution
+        status_count = {}
+        for task in tasks:
+            status = task['status']
+            if status in status_count:
+                status_count[status] += 1
+            else:
+                status_count[status] = 1
+        
+        stats['status_distribution'] = status_count
+        
+        # Calculate priority distribution
+        priority_count = {}
+        for task in tasks:
+            priority = task['priority']
+            if priority in priority_count:
+                priority_count[priority] += 1
+            else:
+                priority_count[priority] = 1
+        
+        stats['priority_distribution'] = priority_count
+        
+        return stats
+    except Exception as e:
+        st.error(f"Error calculating statistics: {str(e)}")
+        return {}
