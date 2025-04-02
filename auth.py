@@ -1,10 +1,9 @@
-import streamlit as st
 import hashlib
 import uuid
 from datetime import datetime
-from db_utils import get_db_connection
+import streamlit as st
+from database import get_db_connection
 
-# User Authentication Functions
 def register_user(username, password, email=None):
     try:
         conn = get_db_connection()
