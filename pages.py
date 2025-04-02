@@ -1,4 +1,3 @@
-
 import streamlit as st
 from datetime import datetime, timedelta
 import pandas as pd
@@ -515,4 +514,8 @@ def view_tasks_page():
             
             if selected_task:
                 with st.expander("Task Details", expanded=True):
-                    st.write(f"**Title:** {
+                    st.write(f"**Title:** {selected_task['title']}")
+                    st.write(f"**Description:** {selected_task['description']}")
+                    st.write(f"**Priority:** {selected_task['priority']}")
+                    st.write(f"**Status:** {selected_task['status']}")
+                    st.write(f"**Due Date:** {selected_task['
