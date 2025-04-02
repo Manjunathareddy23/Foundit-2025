@@ -1597,9 +1597,38 @@ def settings_page():
                         
                         st.success("Password changed successfully")
 
+
 def notifications_page():
     st.title("Notifications")
     
     # Get notifications
     notifications = get_notifications(st.session_state.user_id)
+    
+    if not notifications:
+        st.info("You have no notifications.")
+    else:
+        # Display each notification
+        for notification in notifications:
+            with st.container():
+                col1, col2 = st.columns([10, 1])
+                
+                with col1:
+                    st.markdown(f"**{notification['title']}**")
+                    st.write(notification['message'])
+                    st.text(f"Received: {notification['timestamp']}")
+                
+                with col2:
+                    if not notification.get('read', False):
+                        if st.button("Mark as Read", key=f"read_{notification['id']}"):
+                            mark_notification_as_read(notification['id'])
+                            st.experimental_rerun()
+                
+                st.divider()
+        
+        # Add a button to mark all as read
+        if st.button("Mark All as Read"):
+            mark_all_notifications_as_read(st.session_state.user_id)
+            st.success("All notifications marked as read.")
+            st.experimental_rerun()
+
     
