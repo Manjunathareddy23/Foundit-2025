@@ -817,9 +817,7 @@ def login_page():
                     else:
                         st.error(message)
 
-Here's the continuation of the `dashboard_page()` function and the rest of the code:
 
-```python
 def dashboard_page():
     st.title(f"Welcome, {st.session_state.username}!")
     
