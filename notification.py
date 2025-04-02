@@ -19,4 +19,11 @@ def get_notifications(user_id, unread_only=False):
         cursor.execute(query, params)
         notifications = [dict(row) for row in cursor.fetchall()]
         
-        # Get task details
+        return notifications  # Ensure you return the result
+
+    except Exception as e:
+        st.error(f"Error fetching notifications: {e}")  # Add an except block to catch errors
+        return []
+
+    finally:
+        conn.close()  # Always close the connection
