@@ -817,6 +817,9 @@ def login_page():
                     else:
                         st.error(message)
 
+Here's the continuation of the `dashboard_page()` function and the rest of the code:
+
+```python
 def dashboard_page():
     st.title(f"Welcome, {st.session_state.username}!")
     
@@ -867,4 +870,736 @@ def dashboard_page():
             
             fig = px.bar(priority_df, x='Priority', y='Count', 
                         color='Priority', color_discrete_sequence=px.colors.qualitative.Bold)
-            st.plotly_chart(fig, use
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No tasks available for priority distribution")
+    
+    # Display upcoming tasks and overdue tasks
+    st.subheader("Task Timeline")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### Due Today")
+        tasks_due_today = get_tasks(
+            st.session_state.user_id, 
+            filters={'due_date': datetime.now().strftime("%Y-%m-%d"), 'status': 'Pending'}
+        )
+        
+        if tasks_due_today:
+            for task in tasks_due_today:
+                with st.expander(f"{task['title']} - {task['priority']} Priority"):
+                    st.write(f"**Description:** {task['description']}")
+                    st.write(f"**Tags:** {task['tags']}")
+                    st.write(f"**Assigned to:** {task['assigned_to_name']}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Mark Complete", key=f"complete_today_{task['id']}"):
+                            success, message = update_task(task['id'], {'status': 'Completed'})
+                            if success:
+                                st.success(message)
+                                st.experimental_rerun()
+                            else:
+                                st.error(message)
+                    with col2:
+                        if st.button("View Details", key=f"view_today_{task['id']}"):
+                            st.session_state.selected_task = task['id']
+                            st.session_state.current_page = "task_details"
+                            st.experimental_rerun()
+        else:
+            st.info("No tasks due today")
+    
+    with col2:
+        st.markdown("#### Overdue")
+        today = datetime.now().date()
+        overdue_tasks = []
+        
+        all_tasks = get_tasks(st.session_state.user_id, filters={'status': 'Pending'})
+        for task in all_tasks:
+            if task['due_date']:
+                due_date = datetime.strptime(task['due_date'], "%Y-%m-%d").date()
+                if due_date < today:
+                    overdue_tasks.append(task)
+        
+        if overdue_tasks:
+            for task in overdue_tasks:
+                with st.expander(f"{task['title']} - Due: {task['due_date']}"):
+                    st.write(f"**Description:** {task['description']}")
+                    st.write(f"**Priority:** {task['priority']}")
+                    st.write(f"**Tags:** {task['tags']}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Mark Complete", key=f"complete_overdue_{task['id']}"):
+                            success, message = update_task(task['id'], {'status': 'Completed'})
+                            if success:
+                                st.success(message)
+                                st.experimental_rerun()
+                            else:
+                                st.error(message)
+                    with col2:
+                        if st.button("View Details", key=f"view_overdue_{task['id']}"):
+                            st.session_state.selected_task = task['id']
+                            st.session_state.current_page = "task_details"
+                            st.experimental_rerun()
+        else:
+            st.info("No overdue tasks")
+    
+    # Display task trend over time
+    st.subheader("Task Creation Trend")
+    
+    if stats.get('task_trend'):
+        # Convert to DataFrame
+        trend_data = []
+        for date, count in stats['task_trend'].items():
+            trend_data.append({'Date': date, 'Tasks': count})
+        
+        trend_df = pd.DataFrame(trend_data)
+        trend_df['Date'] = pd.to_datetime(trend_df['Date'])
+        trend_df = trend_df.sort_values('Date')
+        
+        # Create line chart
+        fig = px.line(trend_df, x='Date', y='Tasks', 
+                     title='Tasks Created Over Time',
+                     markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No task trend data available")
+    
+    # Display notifications
+    st.subheader("Recent Notifications")
+    notifications = get_notifications(st.session_state.user_id, unread_only=True)
+    
+    if notifications:
+        for notification in notifications[:5]:  # Show only the 5 most recent
+            with st.expander(f"{notification['message']} - {notification['created_at']}"):
+                if notification.get('task_title'):
+                    st.write(f"**Task:** {notification['task_title']}")
+                
+                if st.button("Mark as Read", key=f"read_{notification['id']}"):
+                    if mark_notification_as_read(notification['id']):
+                        st.success("Notification marked as read")
+                        st.experimental_rerun()
+    else:
+        st.info("No unread notifications")
+
+def add_task_page():
+    st.title("Add New Task")
+    
+    # Check if we're editing a task
+    editing = False
+    task_data = {}
+    
+    if 'selected_task' in st.session_state and st.session_state.selected_task:
+        editing = True
+        # Get task details
+        tasks = get_tasks(st.session_state.user_id)
+        task_data = next((t for t in tasks if t['id'] == st.session_state.selected_task), None)
+        
+        if task_data:
+            st.subheader(f"Editing Task: {task_data['title']}")
+        else:
+            st.error("Task not found!")
+            st.session_state.selected_task = None
+            return
+    
+    # Get all users for assignment
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username FROM users")
+    users = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    # Create a form for task input
+    with st.form("task_form"):
+        title = st.text_input("Title", value=task_data.get('title', ''))
+        description = st.text_area("Description", value=task_data.get('description', ''))
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            priority = st.selectbox(
+                "Priority", 
+                ["Low", "Medium", "High"],
+                index=["Low", "Medium", "High"].index(task_data.get('priority', 'Medium')) if task_data.get('priority') else 1
+            )
+            
+            status = st.selectbox(
+                "Status", 
+                ["Pending", "In Progress", "Completed"],
+                index=["Pending", "In Progress", "Completed"].index(task_data.get('status', 'Pending')) if task_data.get('status') else 0
+            )
+            
+            due_date = st.date_input(
+                "Due Date",
+                value=datetime.strptime(task_data.get('due_date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d') if task_data.get('due_date') else datetime.now()
+            )
+        
+        with col2:
+            assigned_to = st.selectbox(
+                "Assign To",
+                options=[user['id'] for user in users],
+                format_func=lambda x: next((user['username'] for user in users if user['id'] == x), x),
+                index=[user['id'] for user in users].index(task_data.get('assigned_to', st.session_state.user_id)) if task_data.get('assigned_to') in [user['id'] for user in users] else [user['id'] for user in users].index(st.session_state.user_id)
+            )
+            
+            tags = st.text_input("Tags (comma separated)", value=task_data.get('tags', ''))
+            
+            time_estimate = st.number_input(
+                "Estimated Time (hours)", 
+                min_value=0.0, 
+                value=float(task_data.get('time_estimate', 0) or 0) / 60,
+                step=0.5
+            )
+        
+        # Advanced options expander
+        with st.expander("Advanced Options"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                recurring = st.selectbox(
+                    "Recurring",
+                    ["None", "Daily", "Weekly", "Monthly", "Yearly"],
+                    index=["None", "Daily", "Weekly", "Monthly", "Yearly"].index(task_data.get('recurring', 'None')) if task_data.get('recurring') else 0
+                )
+                
+                if recurring != "None":
+                    recurrence_end_date = st.date_input(
+                        "Recurrence End Date",
+                        value=datetime.strptime(task_data.get('recurrence_end_date', (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')), '%Y-%m-%d') if task_data.get('recurrence_end_date') else (datetime.now() + timedelta(days=30))
+                    )
+                else:
+                    recurrence_end_date = None
+            
+            with col2:
+                reminder = st.selectbox(
+                    "Reminder",
+                    ["None", "1 hour before", "1 day before", "1 week before"],
+                    index=["None", "1 hour before", "1 day before", "1 week before"].index(task_data.get('reminder', 'None')) if task_data.get('reminder') else 0
+                )
+                
+                time_spent = st.number_input(
+                    "Time Spent (hours)",
+                    min_value=0.0,
+                    value=float(task_data.get('time_spent', 0) or 0) / 60,
+                    step=0.5
+                )
+            
+            notes = st.text_area("Notes", value=task_data.get('notes', ''))
+        
+        # Submit button
+        submit_button = st.form_submit_button("Save Task")
+        
+        if submit_button:
+            if not title:
+                st.error("Title is required!")
+            else:
+                # Prepare task data
+                new_task_data = {
+                    'title': title,
+                    'description': description,
+                    'priority': priority,
+                    'status': status,
+                    'due_date': due_date.strftime('%Y-%m-%d'),
+                    'assigned_to': assigned_to,
+                    'tags': tags,
+                    'time_estimate': int(time_estimate * 60),  # Convert to minutes
+                    'recurring': recurring,
+                    'notes': notes
+                }
+                
+                if recurring != "None" and recurrence_end_date:
+                    new_task_data['recurrence_end_date'] = recurrence_end_date.strftime('%Y-%m-%d')
+                
+                if reminder != "None":
+                    new_task_data['reminder'] = reminder
+                
+                if time_spent > 0:
+                    new_task_data['time_spent'] = int(time_spent * 60)  # Convert to minutes
+                
+                if editing:
+                    # Update existing task
+                    success, message = update_task(st.session_state.selected_task, new_task_data)
+                    if success:
+                        st.success(message)
+                        # Clear selected task
+                        st.session_state.selected_task = None
+                        # Redirect to tasks page
+                        st.session_state.current_page = "view_tasks"
+                        st.experimental_rerun()
+                    else:
+                        st.error(message)
+                else:
+                    # Add new task
+                    success, message, _ = add_task(new_task_data)
+                    if success:
+                        st.success(message)
+                        # Redirect to tasks page
+                        st.session_state.current_page = "view_tasks"
+                        st.experimental_rerun()
+                    else:
+                        st.error(message)
+    
+    # Cancel button for editing
+    if editing:
+        if st.button("Cancel"):
+            st.session_state.selected_task = None
+            st.session_state.current_page = "view_tasks"
+            st.experimental_rerun()
+
+def view_tasks_page():
+    st.title("View Tasks")
+    
+    # Filters
+    with st.expander("Filters", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            filter_status = st.selectbox(
+                "Status",
+                ["All", "Pending", "In Progress", "Completed"]
+            )
+        
+        with col2:
+            filter_priority = st.selectbox(
+                "Priority",
+                ["All", "Low", "Medium", "High"]
+            )
+        
+        with col3:
+            filter_tags = st.text_input("Tags")
+        
+        with col4:
+            filter_search = st.text_input("Search")
+        
+        # Apply filters button
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            apply_filters = st.button("Apply Filters")
+        with col2:
+            clear_filters = st.button("Clear Filters")
+    
+    # Build filters dictionary
+    filters = {}
+    if apply_filters:
+        if filter_status != "All":
+            filters['status'] = filter_status
+        
+        if filter_priority != "All":
+            filters['priority'] = filter_priority
+        
+        if filter_tags:
+            filters['tags'] = filter_tags
+        
+        if filter_search:
+            filters['search'] = filter_search
+    
+    if clear_filters:
+        # Reset all filters
+        st.experimental_rerun()
+    
+    # Get tasks with filters
+    tasks = get_tasks(st.session_state.user_id, filters=filters)
+    
+    # Display tasks
+    if tasks:
+        # Sorting options
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            sort_by = st.selectbox(
+                "Sort By",
+                ["due_date", "priority", "status", "title"]
+            )
+        with col2:
+            sort_order = st.radio(
+                "Order",
+                ["Ascending", "Descending"],
+                horizontal=True
+            )
+        
+        # Sort tasks
+        tasks = get_tasks(
+            st.session_state.user_id, 
+            filters=filters,
+            sort_by=sort_by,
+            sort_order="asc" if sort_order == "Ascending" else "desc"
+        )
+        
+        # Display tasks in a table
+        task_df = pd.DataFrame([
+            {
+                'Title': t['title'],
+                'Priority': t['priority'],
+                'Status': t['status'],
+                'Due Date': t['due_date'],
+                'Assigned To': t['assigned_to_name'],
+                'Tags': t['tags']
+            } for t in tasks
+        ])
+        
+        st.dataframe(task_df, use_container_width=True)
+        
+        # Export options
+        st.subheader("Export Tasks")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Export as CSV"):
+                csv_data = export_tasks_to_csv(tasks)
+                if csv_data:
+                    st.download_button(
+                        "Download CSV",
+                        csv_data,
+                        "tasks.csv",
+                        "text/csv"
+                    )
+        
+        with col2:
+            if st.button("Export as JSON"):
+                json_data = export_tasks_to_json(tasks)
+                if json_data:
+                    st.download_button(
+                        "Download JSON",
+                        json_data,
+                        "tasks.json",
+                        "application/json"
+                    )
+        
+        # Task details section
+        st.subheader("Task Details")
+        selected_task_id = st.selectbox(
+            "Select a task to view details",
+            options=[t['id'] for t in tasks],
+            format_func=lambda x: next((t['title'] for t in tasks if t['id'] == x), x)
+        )
+        
+        if selected_task_id:
+            selected_task = next((t for t in tasks if t['id'] == selected_task_id), None)
+            
+            if selected_task:
+                with st.expander("Task Details", expanded=True):
+                    st.write(f"**Title:** {selected_task['title']}")
+                    st.write(f"**Description:** {selected_task['description']}")
+                    st.write(f"**Priority:** {selected_task['priority']}")
+                    st.write(f"**Status:** {selected_task['status']}")
+                    st.write(f"**Due Date:** {selected_task['due_date']}")
+                    st.write(f"**Assigned To:** {selected_task['assigned_to_name']}")
+                    st.write(f"**Tags:** {selected_task['tags']}")
+                    
+                    if selected_task.get('notes'):
+                        st.write(f"**Notes:** {selected_task['notes']}")
+                    
+                    # Task actions
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("Edit Task"):
+                            st.session_state.selected_task = selected_task_id
+                            st.session_state.current_page = "add_task"
+                            st.experimental_rerun()
+                    
+                    with col2:
+                        if selected_task['status'] != 'Completed':
+                            if st.button("Mark as Complete"):
+                                success, message = update_task(selected_task_id, {'status': 'Completed'})
+                                if success:
+                                    st.success(message)
+                                    st.experimental_rerun()
+                                else:
+                                    st.error(message)
+                        else:
+                            if st.button("Mark as Pending"):
+                                success, message = update_task(selected_task_id, {'status': 'Pending'})
+                                if success:
+                                    st.success(message)
+                                    st.experimental_rerun()
+                                else:
+                                    st.error(message)
+                    
+                    with col3:
+                        if st.button("Delete Task"):
+                            st.session_state.confirm_delete = selected_task_id
+                            st.experimental_rerun()
+                
+                # Confirm delete dialog
+                if 'confirm_delete' in st.session_state and st.session_state.confirm_delete == selected_task_id:
+                    st.warning("Are you sure you want to delete this task? This action cannot be undone.")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("Yes, Delete"):
+                            success, message = delete_task(selected_task_id)
+                            if success:
+                                st.success(message)
+                                st.session_state.confirm_delete = None
+                                st.experimental_rerun()
+                            else:
+                                st.error(message)
+                    
+                    with col2:
+                        if st.button("Cancel"):
+                            st.session_state.confirm_delete = None
+                            st.experimental_rerun()
+    else:
+        st.info("No tasks found. Add a new task to get started!")
+        
+        if st.button("Add New Task"):
+            st.session_state.current_page = "add_task"
+            st.experimental_rerun()
+
+def statistics_page():
+    st.title("Task Statistics and Reports")
+    
+    # Get task statistics
+    stats = get_task_statistics(st.session_state.user_id)
+    
+    # Summary metrics
+    st.subheader("Task Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Tasks", stats.get('total', 0))
+    
+    with col2:
+        completion_rate = stats.get('completion_rate', 0)
+        st.metric("Completion Rate", f"{completion_rate:.1f}%")
+    
+    with col3:
+        st.metric("Overdue Tasks", stats.get('overdue', 0))
+    
+    with col4:
+        st.metric("Due This Week", stats.get('due_this_week', 0))
+    
+    # Task status breakdown
+    st.subheader("Task Status Breakdown")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        status_data = {
+            'Completed': stats.get('completed', 0),
+            'In Progress': stats.get('in_progress', 0),
+            'Pending': stats.get('pending', 0)
+        }
+        
+        status_df = pd.DataFrame({
+            'Status': list(status_data.keys()),
+            'Count': list(status_data.values())
+        })
+        
+        fig = px.pie(status_df, values='Count', names='Status',
+                    title='Tasks by Status',
+                    color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        priority_data = {
+            'High': stats.get('priority_high', 0),
+            'Medium': stats.get('priority_medium', 0),
+            'Low': stats.get('priority_low', 0)
+        }
+        
+        priority_df = pd.DataFrame({
+            'Priority': list(priority_data.keys()),
+            'Count': list(priority_data.values())
+        })
+        
+        fig = px.bar(priority_df, x='Priority', y='Count',
+                    title='Tasks by Priority',
+                    color='Priority',
+                    color_discrete_sequence=px.colors.qualitative.Bold)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Task trend over time
+    st.subheader("Task Creation Trend")
+    
+    if stats.get('task_trend'):
+        trend_data = []
+        for date, count in stats['task_trend'].items():
+            trend_data.append({'Date': date, 'Tasks': count})
+        
+        trend_df = pd.DataFrame(trend_data)
+        trend_df['Date'] = pd.to_datetime(trend_df['Date'])
+        trend_df = trend_df.sort_values('Date')
+        
+        fig = px.line(trend_df, x='Date', y='Tasks',
+                     title='Tasks Created Over Time',
+                     markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No task trend data available")
+    
+    # Time efficiency
+    st.subheader("Time Efficiency")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Estimated Time (hours)", round(stats.get('estimated_time', 0) / 60, 1))
+    
+    with col2:
+        st.metric("Time Spent (hours)", round(stats.get('time_spent', 0) / 60, 1))
+    
+    if stats.get('estimated_time', 0) > 0:
+        efficiency = (stats.get('time_spent', 0) / stats.get('estimated_time', 0)) * 100
+        
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=efficiency,
+            title={'text': "Time Efficiency"},
+            gauge={
+                'axis': {'range': [0, 200], 'tickwidth': 1},
+                'bar': {'color': "darkblue"},
+                'steps': [
+                    {'range': [0, 80], 'color': "lightgreen"},
+                    {'range': [80, 120], 'color': "yellow"},
+                    {'range': [120, 200], 'color': "red"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 100
+                }
+            }
+        ))
+        
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No time data available for efficiency calculation")
+
+def settings_page():
+    st.title("Settings")
+    
+    # Get current user settings
+    settings = get_user_settings(st.session_state.user_id)
+    
+    # Tabs for different settings categories
+    tab1, tab2, tab3 = st.tabs(["Appearance", "Backup & Restore", "Account"])
+    
+    with tab1:
+        st.subheader("Appearance Settings")
+        
+        # Theme selection
+        theme = st.selectbox(
+            "Theme",
+            ["light", "dark", "custom"],
+            index=["light", "dark", "custom"].index(settings.get('theme', 'light')) if settings.get('theme') in ["light", "dark", "custom"] else 0
+        )
+        
+        # Custom theme options
+        if theme == "custom":
+            primary_color = st.color_picker("Primary Color", settings.get('primary_color', '#3b82f6'))
+            secondary_color = st.color_picker("Secondary Color", settings.get('secondary_color', '#64748b'))
+            background_color = st.color_picker("Background Color", settings.get('background_color', '#f1f5f9'))
+            text_color = st.color_picker("Text Color", settings.get('text_color', '#0f172a'))
+        
+        # Save appearance settings
+        if st.button("Save Appearance Settings"):
+            new_settings = {'theme': theme}
+            
+            if theme == "custom":
+                new_settings['primary_color'] = primary_color
+                new_settings['secondary_color'] = secondary_color
+                new_settings['background_color'] = background_color
+                new_settings['text_color'] = text_color
+            
+            success, message = update_user_settings(st.session_state.user_id, new_settings)
+            if success:
+                st.success(message)
+                st.experimental_rerun()
+            else:
+                st.error(message)
+    
+    with tab2:
+        st.subheader("Backup & Restore")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Create Backup")
+            
+            if st.button("Create Backup"):
+                success, backup_data, filename = create_backup(st.session_state.user_id)
+                
+                if success:
+                    st.success(f"Backup created: {filename}")
+                    st.download_button(
+                        "Download Backup",
+                        backup_data,
+                        filename,
+                        "application/json"
+                    )
+                else:
+                    st.error(backup_data)  # Error message is in backup_data
+        
+        with col2:
+            st.markdown("#### Restore from Backup")
+            
+            uploaded_file = st.file_uploader("Upload Backup File", type=["json"])
+            
+            if uploaded_file is not None:
+                if st.button("Restore from Backup"):
+                    backup_data = uploaded_file.getvalue().decode('utf-8')
+                    success, message = restore_from_backup(backup_data, st.session_state.user_id)
+                    
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+    
+    with tab3:
+        st.subheader("Account Settings")
+        
+        # Get user details
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (st.session_state.user_id,))
+        user = dict(cursor.fetchone())
+        conn.close()
+        
+        # Display account info
+        st.markdown("#### Account Information")
+        st.write(f"**Username:** {user['username']}")
+        st.write(f"**Email:** {user['email'] or 'Not set'}")
+        st.write(f"**Account Created:** {user['created_at']}")
+        st.write(f"**Last Login:** {user['last_login']}")
+        
+        # Change password
+        st.markdown("#### Change Password")
+        
+        with st.form("change_password_form"):
+            current_password = st.text_input("Current Password", type="password")
+            new_password = st.text_input("New Password", type="password")
+            confirm_password = st.text_input("Confirm New Password", type="password")
+            
+            submit = st.form_submit_button("Change Password")
+            
+            if submit:
+                if not current_password or not new_password or not confirm_password:
+                    st.error("All fields are required")
+                elif new_password != confirm_password:
+                    st.error("New passwords do not match")
+                else:
+                    # Verify current password
+                    hashed_current = hashlib.sha256(current_password.encode()).hexdigest()
+                    
+                    if hashed_current != user['password']:
+                        st.error("Current password is incorrect")
+                    else:
+                        # Update password
+                        hashed_new = hashlib.sha256(new_password.encode()).hexdigest()
+                        
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE users SET password = ? WHERE id = ?", (hashed_new, st.session_state.user_id))
+                        conn.commit()
+                        conn.close()
+                        
+                        st.success("Password changed successfully")
+
+def notifications_page():
+    st.title("Notifications")
+    
+    # Get notifications
+    notifications = get_notifications(st.session_state.user_id)
+    
