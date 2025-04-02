@@ -1,3 +1,30 @@
+import uuid
+import hashlib
+import streamlit as st
+from database import get_db_connection
+
+def get_user_settings(user_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT setting_key, setting_value FROM settings WHERE user_id = ?", (user_id,))
+        settings = {row['setting_key']: row['setting_value'] for row in cursor.fetchall()}
+        
+        # Get user theme
+        cursor.execute("SELECT theme FROM users WHERE id = ?", (user_id,))
+        user = cursor.fetchone()
+        if user and user['theme']:
+            settings['theme'] = user['theme']
+        else:
+            settings['theme'] = 'light'
+        
+        conn.close()
+        return settings
+    except Exception as e:
+        st.error(f"Error fetching settings: {str(e)}")
+        return {}
+
 def update_user_settings(user_id, settings):
     try:
         conn = get_db_connection()
