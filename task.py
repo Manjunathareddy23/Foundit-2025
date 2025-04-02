@@ -285,8 +285,6 @@ def get_task_statistics(user_id):
             else:
                 priority_count[priority] = 1
         
-        stats['priority_distribution'] = priority_count
-        
         return stats
     except Exception as e:
         st.error(f"Error calculating statistics: {str(e)}")
