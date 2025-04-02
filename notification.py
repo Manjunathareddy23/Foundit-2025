@@ -9,14 +9,4 @@ def get_notifications(user_id, unread_only=False):
         cursor = conn.cursor()
         
         query = "SELECT * FROM notifications WHERE user_id = ?"
-        params = [user_id]
-        
-        if unread_only:
-            query += " AND read = 0"
-        
-        query += " ORDER BY created_at DESC"
-        
-        cursor.execute(query, params)
-        notifications = [dict(row) for row in cursor.fetchall()]
-        
-        # Get task details
+        params
